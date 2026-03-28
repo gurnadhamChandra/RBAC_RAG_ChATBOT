@@ -1,0 +1,31 @@
+{
+    "684a4d30-e47a-4ab3-9338-1ca36c362cdc": {
+        "username": "string",
+        "password": "string",
+        "role": "string"
+    },
+    "57149737-2bc1-4e92-977e-99a2cc87337b": {
+        "username": "test",
+        "password": "test123",
+        "role": "hr",
+        "logged_in": true
+    },
+    "e65efc7d-16ad-4f8a-aab6-7b0a9e18ec4e": {
+        "username": "chandra",
+        "password": "chandra123",
+        "role": "marketing",
+        "logged_in": true
+    },
+    "eae0aff8-0c6b-4566-87c0-8893bbf51400": {
+        "username": "raja",
+        "password": "raja@#",
+        "role": "finance",
+        "logged_in": true
+    },
+    "b094339b-5972-4fec-ba44-90d3a759c800": {
+        "username": "abc",
+        "password": "abc@#123",
+        "role": "finance",
+        "logged_in": true
+    }
+}
