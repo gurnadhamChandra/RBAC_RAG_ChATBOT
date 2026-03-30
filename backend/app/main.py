@@ -1,311 +1,366 @@
-# from typing import Dict
+from fastapi import FastAPI, HTTPException, Depends, Form
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel
+from jose import JWTError, jwt
+from datetime import datetime, timedelta
+from typing import Dict, Optional
+from uuid import uuid4
+import os
+import json
+import shutil
+import warnings
+from dotenv import load_dotenv
+from fastapi.middleware.cors import CORSMiddleware
 
-# import sqlite3
-# import pandas as pd
-# import numpy as np
-# import os
-# import duckdb
-# from passlib.context import CryptContext
-# from pathlib import Path
-# from pydantic import BaseModel
-# from fastapi import FastAPI,Depends,HTTPException,UploadFile,File,Form
-# from fastapi.security import HTTPBasic,HTTPBasicCredentials
-# from fastapi.responses import JSONResponse
-# from fastapi import BackgroundTasks
-# from fastapi.middleware.cors import CORSMiddleware
-# # from langchain_community.embeddings.openai import OpenAIEmbedding
-# from langchain_openai import OpenAIEmbeddings
-# from langchain_core.documents import Document
-# from dotenv import load_dotenv
+from langchain_community.document_loaders import DirectoryLoader, TextLoader, CSVLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_groq import ChatGroq
+from langchain_core.prompts import PromptTemplate
+from collections import defaultdict, deque
 
-# load_dotenv()
+# store last 5 chats  of user
+chat_memory=defaultdict(lambda: deque(maxlen=5))
+load_dotenv()
+warnings.filterwarnings("ignore", category=UserWarning, module="langchain")
 
-# from .utils.rag_module import run_indexer,vectorstore,get_rag_chain
-# from .utils.query_classifier import detect_query_type_llm
-# from .utils.csv_query import ask_csv
-# from .utils.rag_chain import ask_rag
+class LoginRequest(BaseModel):
+    username: str
+    password: str
 
-# app = FastAPI()
-# security = HTTPBasic()
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    role: str
 
-# # Enable CORS
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],  # Allow all origins (for development; restrict in production)
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
+class logoutRequest(BaseModel):
+    username: str
 
-# # Password hashing context
-# pwd_context = CryptContext(schemes=["bcrypt_sha256"],
-#     deprecated="auto")
+class ragChatRequest(BaseModel):
+    query:str
+    role:str
 
-
-# # DUCK DB setup===
-
-# DUCKDB_DIR=Path("statics/data")  # folder in repo contains structured_quiries.duckdb
-# DUCKDB_DIR.mkdir(parents=True,exist_ok=True)
-# DUCKDB_PATH=DUCKDB_DIR/"structured_quiries.duckdb"
-
-# duckdb_conn=duckdb.connect(str(DUCKDB_PATH))
-# print("DuckDB initialized at", DUCKDB_PATH)
-# duckdb_conn.execute("SELECT 'Hello DuckDB!' AS greeting").fetchall()
-# duckdb_conn.execute("""
-#     CREATE TABLE IF NOT EXISTS tables_metadata (
-#         table_name TEXT,
-#         role TEXT
-#     )
-# """)
-
-# # SQLITE3 db setup===
-
-# sql_conn=sqlite3.connect("roles.db",check_same_thread=False)
-# sql_cursor=sql_conn.cursor()
-# sql_cursor.executescript("""
-# CREATE TABLE IF NOT EXISTS users (
-#     id INTEGER PRIMARY KEY AUTOINCREMENT,
-#     username TEXT UNIQUE,
-#     password TEXT,
-#     role TEXT
-# );
-
-# CREATE TABLE IF NOT EXISTS roles (
-#     id INTEGER PRIMARY KEY AUTOINCREMENT,
-#     role_name TEXT UNIQUE
-# );
-
-# CREATE TABLE IF NOT EXISTS documents (
-#      id INTEGER PRIMARY KEY AUTOINCREMENT,
-#     filename TEXT,
-#     role TEXT,
-#     filepath TEXT NOT NULL,
-#     headers_str TEXT,
-#     embedded INTEGER DEFAULT 0
-# );
-# """)
-# sql_conn.commit()
-
-# def create_default_user():
-#     sql_conn_local=sqlite3.connect("roles.db")
-#     sql_cursor_local=sql_conn_local.cursor()
-#     sql_cursor_local.execute("INSERT OR IGNORE INTO roles (role_name) VALUES (?)", ("C-Level",))
-#     hashed_password=pwd_context.hash("admin123")
-#     try:
-#         sql_cursor_local.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", ("admin", hashed_password, "C-Level"))
-#         sql_conn_local.commit()
-#         print("Default admin user created.")
-#     except sqlite3.IntegrityError:
-#         print("Default admin user already exists.")
-#     finally:
-#         sql_conn_local.close()
-
-# create_default_user()
+BASE_DIR =os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "..","resources","data")
 
 
+# HF_TOKEN = os.getenv("HUGGINGFACEHUB_API_TOKEN")
+# GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+SECRET_KEY = "supersecretkey"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 
-# # Dummy user database
-# # users_db: Dict[str, Dict[str, str]] = {
-# #     "Tony": {"password": "password123", "role": "engineering"},
-# #     "Bruce": {"password": "securepass", "role": "marketing"},
-# #     "Sam": {"password": "financepass", "role": "finance"},
-# #     "Peter": {"password": "pete123", "role": "engineering"},
-# #     "Sid": {"password": "sidpass123", "role": "marketing"},
-# #     "Natasha": {"passwoed": "hrpass123", "role": "hr"}
-# # }
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
+app = FastAPI(title="RAG-Powered Role-Based Chatbot API")
+DB_FILE = "users.json"
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # Streamlit origin
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
-# # Authentication dependency
-# def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
-#     username = credentials.username
-#     password = credentials.password
-#     sql_cursor.execute("SELECT password, role FROM users WHERE username = ?", (username,))
-#     result = sql_cursor.fetchone()
-#     if not result or not pwd_context.verify(password, result[0]):
-#         raise HTTPException(status_code=401, detail="Invalid credentials")
-#     return {"username": username, "role": result[1]}
+def load_users():
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r") as f:
+            return json.load(f)
+    return {}
 
+def save_users():
+    with open(DB_FILE, "w") as f:
+        json.dump(users_db, f, indent=4)
 
-# # Models====
+users_db: Dict[str, Dict] = load_users()
 
-# class ChatRequest(BaseModel):
-#     question:str
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-# class CreateUserRequest(BaseModel):
-#     username: str
-#     password: str
-#     role: str
+def authenticate_user(username: str, password: str):
+    for user_id, user_data in users_db.items():
+        if user_data["username"] == username and user_data["password"] == password:
+            return {"id": user_id, "username": username, "role": user_data["role"]}
+    return None
 
-# class CreateRoleRequest(BaseModel):
-#     role_name: str
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        role = payload.get("role")
+        user_id = payload.get("uid")
+        if not username or not role or not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token payload.")
+        return {"id": user_id, "username": username, "role": role}
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token.")
 
-# class LoginRequest(BaseModel):
-#     username: str
-#     password: str
-
-
-# # Routes and logics====
-
-# # Login endpoint
-# # @app.get("/login")
-# # def login(user=Depends(authenticate)):
-# #     return {"message": f"Welcome {user['username']}!", "role": user["role"]}
-
-# @app.post("/login")
-# def login_json(req: LoginRequest):
-#     sql_cursor.execute("SELECT password, role FROM users WHERE username = ?", (req.username,))
-#     result = sql_cursor.fetchone()
-#     if not result or not pwd_context.verify(req.password, result[0]):
-#         raise HTTPException(status_code=401, detail="Invalid credentials")
-#     return {"message": f"Welcome {req.username}!", "role": result[1], "username": req.username}
-
-# @app.get("/roles")
-# def get_roles(user=Depends(authenticate)):
-#     sql_cursor.execute("select role_name from roles")
-#     roles=sql_cursor.fetchall()
-#     return {"roles":[r[0] for r in roles]}
-
-# @app.post("/create-user")
-# def create_user(req: CreateUserRequest, user=Depends(authenticate)):
-#     if user["role"] != "C-Level":
-#         raise HTTPException(status_code=403, detail="Only C-Level users can create new users.")
-#     sql_cursor.execute("SELECT 1 FROM roles WHERE role_name=?",(req.role,))
-#     if not sql_cursor.fetchone():
-#         raise HTTPException(status_code=400, detail="Invalid role specified.")
-#     hashed_password=pwd_context.hash(req.password)
-#     try:
-#         sql_cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", (req.username, hashed_password, req.role))
-#         sql_conn.commit()
-#         return {"message": f"User '{req.username}' created successfully with role '{req.role}'."}
-#     except sqlite3.IntegrityError:
-#         raise HTTPException(status_code=400, detail="Username already exists.")
+@app.post("/register")
+def register(request: RegisterRequest):
+    if any(u["username"] == request.username for u in users_db.values()):
+        # raise HTTPException(status_code=400, detail="Username already exists.")
+        return {"message": "Username already exists."}
     
-# @app.post("/create-role")
-# def create_role(req: CreateRoleRequest, user=Depends(authenticate)):
-#     if user["role"] != "C-Level":
-#         raise HTTPException(status_code=403, detail="Only C-Level users can create new roles.")
-#     try:
-#         sql_cursor.execute("INSERT INTO roles (role_name) VALUES (?)", (req.role_name,))
-#         sql_conn.commit()
-#         return {"message": f"Role '{req.role_name}' created successfully."}
-#     except sqlite3.IntegrityError:
-#         raise HTTPException(status_code=400, detail="Role already exists.")
+    user_id = str(uuid4())
+    users_db[user_id] = {"username": request.username, "password": request.password, "role": request.role}
+    save_users()
+    return {"message": f"User '{request.username}' registered successfully as '{request.role}'."}
+
+@app.post("/login")
+def login(request: LoginRequest):
+    user = authenticate_user(request.username, request.password)
+    if not user:
+        return {"message": "Incorrect username or password. Please register."}
+
+    # Mark user as logged in
+    users_db[user["id"]]["logged_in"] = True
+    save_users()
+
+    token = create_access_token({
+        "sub": user["username"],
+        "uid": user["id"],
+        "role": user["role"]
+    })
+    return {"access_token": token, "token_type": "bearer", "username": user["username"], "role": user["role"]}
+
+@app.post("/logout")
+def logout(request:logoutRequest):
+    for user_id, user_data in users_db.items():
+        if user_data["username"] == request.username:
+            user_data["logged_in"] = False
+            save_users()
+            return {"message": "Logged out successfully"}
+    raise HTTPException(status_code=404, detail="User not found.")
+
+
+@app.get("/get_user_status")
+def get_user_status(username: str):
+    for user_data in users_db.values():
+        if user_data["username"] == username:
+            return {
+                "logged_in": user_data.get("logged_in", False),
+                "role": user_data["role"]
+            }
+    raise HTTPException(status_code=404, detail="User not found.")
+
+
+@app.get("/protected")
+def protected(user=Depends(get_current_user)):
+    return {"message": f"Hello {user['username']}! You are logged in as {user['role']}.", "user": user}
+
+ATA_DIR = "./resources/data"
+VECTOR_DIR = "./faiss_vectors"
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+
+
+@app.post("/build_vectors")
+def build_vectors():
+    print("starting build vector process...")
+    logs={}
+     # 1. Reset vector storage
+    if os.path.exists(VECTOR_DIR):
+        print("🧹 Cleaning old vector directory...")
+        shutil.rmtree(VECTOR_DIR)
+    os.makedirs(VECTOR_DIR, exist_ok=True)
+    print(f"📁 Vector directory ready: {VECTOR_DIR}")
     
+    # 2. Iterate through each role
+    for role in os.listdir(DATA_DIR):
+        role_path = os.path.join(DATA_DIR, role)
+        print(f"<UNK> Role {role} ready: {role_path}")
+        if not os.path.isdir(role_path):
+            continue
 
-# UPLOAD_DIR="statics/uploads"
+        print(f"\n🔍 Processing role: {role} {role_path}")
+        all_docs = []
 
-# @app.post("/upload")
-# async def upload_files(file:UploadFile=File(...),role:str=Form(...)):
-#     try:
-#         filename=file.filename
-#         extension=Path(filename).suffix.lower()
+        # --- Load .md Files ---
+        for fname in os.listdir(role_path):
+            if fname.endswith(".md"):
+                fpath = os.path.join(role_path, fname)
+                try:
+                    loader = TextLoader(fpath, encoding="utf-8")  # Specify encoding
+                    docs = loader.load()
+                    all_docs.extend(docs)
+                    print(f"📄 Loaded .md file: {fname} ({len(docs)} docs)")
+                except Exception as e:
+                    print(f"❌ Skipping {fname}: {e}")
 
-#         # storage==
-#         role_dir=os.path.join(UPLOAD_DIR,role)
-#         os.makedirs(role_dir,exist_ok=True)
-#         file_path=os.path.join(role_dir,filename)
+        # --- Load .csv Files ---
+        for fname in os.listdir(role_path):
+            print(fname.endswith)
+            if fname.endswith(".csv"):
+                fpath = os.path.join(role_path, fname)
+                try:
+                    loader = CSVLoader(file_path=fpath)
+                    docs = loader.load()
+                    all_docs.extend(docs)
+                    print(f"🧾 Loaded .csv file: {fname} ({len(docs)} rows)")
+                except Exception as e:
+                    print(f"❌ Skipping CSV {fname}: {e}")
 
-#         # contnet reading==
-#         data = await file.read()
-#         with open(file_path, "wb") as f:
-#             f.write(data)   # saving file for next use
-#         if extension==".csv":
-#             from io import BytesIO
-#             df=pd.read_csv(BytesIO(data))
-#             content=df.to_string(index=False)
+        if not all_docs:
+            logs[role] = "⚠️ No valid documents found"
+            print(logs[role])
+            continue
 
-#             # load into duckdb==
-#             df1=pd.read_csv(file_path)
-#             table_name=Path(file_path).stem.replace("-","_").lower()
+        #chunks storing
+        chunks=splitter.split_documents(all_docs)
+        print(f"created{len(chunks)} chunks for role:{role}")
+        if not chunks:
+            logs[role]="No chunks created"
+            continue
+        try:
+            vectordb=FAISS.from_documents(chunks,embedding_model)
+            role_vect_path=os.path.join(VECTOR_DIR,role)
+            vectordb.save_local(role_vect_path)
+            logs[role] = f"✅ {len(chunks)} chunks stored at {role_vect_path}"
+            print(logs[role])
+        except Exception as e:
+            logs[role] = f"❌ Vector store creation failed: {e}"
+            print(logs[role])
 
-#             # save data to duckdb
-#             headers =df1.columns.tolist()
-#             headers_str=",".join(headers)
-#             duckdb_conn.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * from df1")
+    print("\n✅ Vector building complete.\n")
+    return {"status": "completed", "details": logs}
 
-#             # save to table_metadata
-#             duckdb_conn.execute("INSERT INTO tables_metadata (table_name, role) VALUES (?, ?)", (table_name, role))
+@app.post("/rag_chat")
+def rag_chat(request:ragChatRequest):
+    print(f"\n🟦 Received RAG Chat Request")
+    print(f"📝 Query: {request.query}")
+    print(f"👤 Role: {request.role}")
+    role = request.role.lower().strip()
+    role_vector_path = os.path.join(VECTOR_DIR, role)
+    
+    if not os.path.exists(role_vector_path):
+        msg = f"❌ No vector store found for role '{role}'"
+        print(msg)
+        raise HTTPException(status_code=404, detail=msg)
+    
+    try:
+        print(f"loading vector from local vector:{role_vector_path}")
+        vectordb=FAISS.load_local(
+            folder_path=role_vector_path,
+            embeddings=embedding_model,
+            allow_dangerous_deserialization=True
+        )
+        retriver=vectordb.as_retriever(
+            # max marginal relevence
+            search_type="mmr", 
+            search_kwargs={
+                 "k": 10,  # Increase to give the model more context to work with
+                "lambda_mult": 0.5  # 0.5 balances relevance (0.0) and diversity (1.0)
+            }
+        )
+        docs = retriver.invoke(request.query)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"❌ Retrieval error: {e}")
+    
+    if not docs:
+        return {"response": "No relevant information found."}
 
-#         elif extension == ".md":
-#             content=data.decode("utf-8")
-#             headers_str=None
-#         else:
-#             raise HTTPException(status_code=400, detail="Unsupported file type. Only CSV and MD files are allowed.")
+    context = "\n\n".join(doc.page_content for doc in docs)
+
+    # 🔁 Get chat history
+    history = chat_memory[role]
+    formatted_history = ""
+    for i, (q, a) in enumerate(history):
+        formatted_history += f"\nUser: {q}\nFinBot: {a}"
+
+    llm = ChatGroq(
+    model_name="llama-3.1-8b-instant",
+    api_key=GROQ_API_KEY
+    )
+
+    prompt = PromptTemplate.from_template("""
+    You are FinBot — a professional, intelligent assistant designed to assist users in finance with crisp, engaging, and secure replies. Your core directive is to **strictly adhere to financial topics and the provided context**.
+
+    ---
+
+    User Role: {role}
+    User Question: {query}
+
+    Conversation History:
+    {history}
+
+    ---
+
+    **Instructions for FinBot:**
+
+    1.  🎯 **Greeting Handling**:
+        this needs to be executed only when user uses greeting
+        If the user input is **ONLY** a greeting (e.g., "Hi", "Hello", "Hey FinBot"), respond **ONLY** with:
+        "Hi, I’m FinBot. How can I assist you with your {role} data today?"
+        Keep it simple and friendly — do not add extra info or answer anything else.
+
+    2.  🚫 **Strict Scope Enforcement (Critical!)**:
+        - **NEVER** answer general knowledge questions or queries unrelated to finance.
+        - **NEVER** answer questions where the information is not **explicitly and directly** present within the <context>.
+        - **Always** choose one of the "Concise Redirection" responses (Rule 4) for any question that falls outside the defined scope (general, non-financial, or not found in context).
+        - Do not guess, assume, or pull from external knowledge. Your sole source of truth is the provided <context>.
+
+    3.  ✅ **If you CAN answer (Financial & In-Context)**:
+        - Give a short, well-written answer in full sentences.
+        - Be confident, informative, and clear. Do not hallucinate.
+        - Ensure the response contains **only** the answer to the question, no introductory phrases (like "Here's your answer," "Based on context," etc.), and do not repeat the user's question.
+
+     4. Role-Based Access Denial for Out-of-Scope Queries ( if questions answer is not present in the context then)
+        - If a user asks a question outside their assigned role, the system must not provide any information and should redirect with a firm but polite denial.
+            
+        - Use one of the following predefined role-based denial messages (insert the user's actual role in {role}):
+            
+        - “Access denied. This information is restricted outside your {role} access.”
+            
+        - “Sorry, you’re not authorized to view data beyond your {role} permissions.”
+            
+        - “This topic isn’t available for your role. Please ask something related to {role}.”
+            
+        - “Your current access level only permits questions related to {role}.”
+            
+        - Do not explain why access is denied or reference internal system rules.
+            
+        - Always enforce role boundaries without exception.
+
+    5.  💬 **General Style & Conciseness**:
+        - Be helpful and professional, like an AI advisor.
+        - Keep things human-readable, short, brief, and clear. Use bullet points if needed for lists.
+        - Avoid any conversational fillers or unnecessary preambles.
         
-#         # save metadata to sqlite
-#         conn=sqlite3.connect("roles.db")
-#         cursor=conn.cursor()
-#         cursor.execute("INSERT INTO documents (filename, role, filepath, headers_str) VALUES (?, ?, ?, ?)", (filename, role, file_path, headers_str))
-#         conn.commit()
-#         conn.close()
+    Provide the answer directly don't include anything else like the answer to your question, then showing the same question again in response etc.
+    - Only give the answer to the question don't add anything else.
+    ---
 
-#         run_indexer()
-#         print(f"File '{filename}' uploaded and processed successfully for role '{role}'.")
-#         return JSONResponse(content={"message": f"{filename} uploaded successfully for role '{role}'."})
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"File upload failed: {e}")
-    
+    <context>
+    {context}
+    </context>
+    """)
 
-# @app.post("/chat")
-# async def chat(request:ChatRequest,user=Depends(authenticate)):
-#     role=user["role"]
-#     query=request.question
-#     username=user["username"]
+   # 🔥 NEW CHAIN (LCEL)
 
-#     # 1. Detect mode: SQL or RAG
-#     mode = detect_query_type_llm(query)
-#     print(f"Detected mode: {mode}")
+    chain = prompt | llm
 
-#     result = {}
-#     fallback_used = False
+    try:
+        response = chain.invoke({
+            "context": context,
+            "query": request.query,
+            "role": role,
+            "history": formatted_history
+        })
+        answer =response.content
+        print(f"✅ LLM Response: {answer[:300]}...\n")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"❌ LLM error: {e}")
 
-#     # route to appropriate logic based on mode
-#     if mode == "SQL":
-#         try:
-#             result =await ask_csv(query,role,username,return_sql=True)
-#             if result.get("error") or not result.get("answer", "").strip():
-#                 raise ValueError("SQL query blocked or failed")
-#         except Exception as e:
-#             print(f"[SQL Fallback Triggered] Error: {e}")
-#             result = await ask_rag(query, role)
-#             fallback_used = True
-#             mode = "SQL → fallback to RAG"
-#     else:
-#         result = await ask_rag(query, role)
+    # 📝 Save current interaction in memory
+    chat_memory[role].append((request.query, answer))
 
-#     return {
-#         "mode": mode,
-#         "user": username,
-#         "role": role,
-#         "fallback": fallback_used,
-#         "answer": result["answer"],
-#         **({"sql": result["sql"]} if "sql" in result else {})
-#     }
-
-
-# # Protected test endpoint
-# @app.get("/test")
-# def test(user=Depends(authenticate)):
-#     return {"message": f"Hello {user['username']}! You can now chat.", "role": user["role"]}
-
-
-
-# @app.get("/db-health")
-# def db_health():
-#     try:
-#         result = duckdb_conn.execute("SELECT 1 AS status").fetchone()
-#         return {"duckdb": "ok", "status": int(result[0])}
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"DuckDB health check failed: {e}")
-
-
-# @app.get("/users-check")
-# def users_check():
-#     try:
-#         sql_cursor_check = sql_conn.cursor()
-#         sql_cursor_check.execute("SELECT username, role FROM users")
-#         users_list = sql_cursor_check.fetchall()
-#         return {"users_count": len(users_list), "users": [{"username": u[0], "role": u[1]} for u in users_list]}
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"Users check failed: {e}")
+    return {"response": answer}

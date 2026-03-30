@@ -12,3 +12,7 @@ wheels/
 *.lock
 resources/vectorstore
 .env
+faiss_vectors/
+chroma_db/
+users.json
+roles.db
