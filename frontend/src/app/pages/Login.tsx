@@ -4,6 +4,7 @@ import { LogIn, UserPlus, Shield } from "lucide-react";
 import { UserRole, RBAC_CONFIG } from "../types/user";
 import { loginUser, registerUser } from "../services/api";
 import { useAuth } from "../components/authContext/AuthContext";
+import Snackbar from '@mui/material/Snackbar';
 
 export default function Auth() {
   const [username, setUsername] = useState("");
@@ -12,6 +13,8 @@ export default function Auth() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [isRegister, setIsRegister] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState("");
 
   const { login } = useAuth();  // context
   const navigate = useNavigate();
@@ -58,18 +61,15 @@ export default function Auth() {
 
     try {
       const res = await registerUser({ username, password, role });
-
-      if (res?.message) {
-        setError(res.message);
-        return;
-      }
-
-      alert("✅ Registered successfully! Please login.");
       setIsRegister(false);
       setUsername("");
       setPassword("");
+      if (res?.message) {
+        setSnackbarMessage(res.message);
+        setOpen(true);
+      }
     } catch (err) {
-      setError("Network error. Please check your connection.");
+      setError(`Network error. Please check your connection.${err}`);
     } finally {
       setIsLoading(false);
     }
@@ -194,6 +194,13 @@ export default function Auth() {
             </p>
           )}
         </div>
+        <Snackbar
+          open={open}
+          autoHideDuration={2000}
+          onClose={() => setOpen(false)}
+          anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+          message={snackbarMessage}
+        />
       </div>
     </div>
   );
