@@ -4,6 +4,7 @@ import { ArrowLeft, Send, Shield, FileText } from "lucide-react";
 import ChatMessage from "../components/ChatMessage";
 import { chatData } from "../services/api";
 import { useAuth } from "../components/authContext/AuthContext";
+import { UserRole, RBAC_CONFIG } from "../types/user";
 
 interface Message {
   id: string;
@@ -18,7 +19,7 @@ const departmentInfo: Record<string, { name: string; icon: string; color: string
   marketing: { name: "Marketing", icon: "📢", color: "bg-purple-500" },
   finance: { name: "Finance", icon: "💰", color: "bg-green-500" },
   engineering: { name: "Engineering", icon: "⚙️", color: "bg-orange-500" },
-  data: { name: "Data Analytics", icon: "📊", color: "bg-pink-500" },
+  general: { name: "General Data Team", icon: "📊", color: "bg-pink-500" },
 };
 
 export default function Chat() {
@@ -33,7 +34,9 @@ export default function Chat() {
   // 🔥 Context
   const { user, role, accessToken } = useAuth();
 
-  const deptInfo = department ? departmentInfo[department] : null;
+  const [chatRole, setChatRole] = useState<string>(department || 'hr');
+
+  const deptInfo = chatRole ? departmentInfo[chatRole] : null;
 
   // 🔒 Protect route
   useEffect(() => {
@@ -65,7 +68,8 @@ export default function Chat() {
     try {
       const response = await chatData({
         query: inputText,
-        role: role ,
+        role: chatRole,
+        user_role: role,
         // token: accessToken,
       });
 
@@ -123,6 +127,20 @@ export default function Chat() {
                   {role === "executive" ? "Full Access" : "Team Access"}
                 </span>
               </div>
+
+              {role === "executive" && (
+                <select
+                  value={chatRole}
+                  onChange={(e) => setChatRole(e.target.value)}
+                  className="px-3 py-1 border border-gray-300 rounded-lg text-sm"
+                >
+                  {Object.entries(departmentInfo).map(([key, info]) => (
+                    <option key={key} value={key}>
+                      {info.name}
+                    </option>
+                  ))}
+                </select>
+              )}
             </>
           )}
         </div>

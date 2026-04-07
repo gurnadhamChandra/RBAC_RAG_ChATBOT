@@ -40,11 +40,11 @@ const departments: Department[] = [
     description: "Architecture, deployments",
   },
   {
-    id: "data",
-    name: "Data Analytics",
+    id: "general",
+    name: "General Data Team",
     color: "bg-pink-500",
     icon: "📊",
-    allowedRoles: ["data", "executive"],
+    allowedRoles: ["general", "executive"],
     description: "Reports, ML models",
   },
 ];

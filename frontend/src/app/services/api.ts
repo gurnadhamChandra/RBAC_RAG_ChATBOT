@@ -50,11 +50,12 @@ export const logoutUser=async({username}:{username:string})=>{
     }
 }
 
-export const chatData=async({query,role}:{query:string,role:string})=>{
+export const chatData=async({query,role,user_role}:{query:string,role:string,user_role:string})=>{
   try{
     const response = await api.post("/rag_chat",{
       query,
-      role
+      role,
+      user_role
     })
     return response.data
 
