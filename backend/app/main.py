@@ -117,7 +117,7 @@ def register(request: RegisterRequest):
 def login(request: LoginRequest):
     user = authenticate_user(request.username, request.password)
     if not user:
-        return {"message": "Incorrect username or password. Please register."}
+        return {"message": "Doesn't exist username or password. Please register."}
 
     # Mark user as logged in
     users_db[user["id"]]["logged_in"] = True
