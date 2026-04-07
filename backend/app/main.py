@@ -40,6 +40,7 @@ class logoutRequest(BaseModel):
 class ragChatRequest(BaseModel):
     query:str
     role:str
+    user_role:str
 
 BASE_DIR =os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "..","resources","data")
@@ -174,6 +175,8 @@ def build_vectors():
     os.makedirs(VECTOR_DIR, exist_ok=True)
     print(f"📁 Vector directory ready: {VECTOR_DIR}")
     
+    all_chunks = []  # Collect all chunks for executive
+    
     # 2. Iterate through each role
     for role in os.listdir(DATA_DIR):
         role_path = os.path.join(DATA_DIR, role)
@@ -226,9 +229,26 @@ def build_vectors():
             vectordb.save_local(role_vect_path)
             logs[role] = f"✅ {len(chunks)} chunks stored at {role_vect_path}"
             print(logs[role])
+            
+            # Add to all_chunks for executive
+            all_chunks.extend(chunks)
         except Exception as e:
             logs[role] = f"❌ Vector store creation failed: {e}"
             print(logs[role])
+
+    # Create executive vector store with all data
+    if all_chunks:
+        try:
+            executive_vectordb = FAISS.from_documents(all_chunks, embedding_model)
+            executive_vect_path = os.path.join(VECTOR_DIR, "executive")
+            executive_vectordb.save_local(executive_vect_path)
+            logs["executive"] = f"✅ {len(all_chunks)} chunks stored at {executive_vect_path}"
+            print(logs["executive"])
+        except Exception as e:
+            logs["executive"] = f"❌ Executive vector store creation failed: {e}"
+            print(logs["executive"])
+    else:
+        logs["executive"] = "⚠️ No chunks for executive"
 
     print("\n✅ Vector building complete.\n")
     return {"status": "completed", "details": logs}
@@ -286,7 +306,7 @@ def rag_chat(request:ragChatRequest):
 
     ---
 
-    User Role: {role}
+    User Role: {user_role}
     User Question: {query}
 
     Conversation History:
@@ -314,21 +334,21 @@ def rag_chat(request:ragChatRequest):
         - Ensure the response contains **only** the answer to the question, no introductory phrases (like "Here's your answer," "Based on context," etc.), and do not repeat the user's question.
 
      4. Role-Based Access Denial for Out-of-Scope Queries ( if questions answer is not present in the context then)
-        - If a user asks a question outside their assigned role, the system must not provide any information and should redirect with a firm but polite denial.
+        - If the user role is not "executive" and a user asks a question outside their assigned role, the system must not provide any information and should redirect with a firm but polite denial.
             
-        - Use one of the following predefined role-based denial messages (insert the user's actual role in {role}):
+        - Use one of the following predefined role-based denial messages (insert the user's actual role in {user_role}):
             
-        - “Access denied. This information is restricted outside your {role} access.”
+        - "Access denied. This information is restricted outside your {user_role} access."
             
-        - “Sorry, you’re not authorized to view data beyond your {role} permissions.”
+        - "Sorry, you're not authorized to view data beyond your {user_role} permissions."
             
-        - “This topic isn’t available for your role. Please ask something related to {role}.”
+        - "This topic isn't available for your role. Please ask something related to {user_role}."
             
-        - “Your current access level only permits questions related to {role}.”
+        - "Your current access level only permits questions related to {user_role}."
             
         - Do not explain why access is denied or reference internal system rules.
             
-        - Always enforce role boundaries without exception.
+        - For executive role, allow access to all topics as they have full access.
 
     5.  💬 **General Style & Conciseness**:
         - Be helpful and professional, like an AI advisor.
@@ -353,7 +373,8 @@ def rag_chat(request:ragChatRequest):
             "context": context,
             "query": request.query,
             "role": role,
-            "history": formatted_history
+            "history": formatted_history,
+            "user_role": request.user_role
         })
         answer =response.content
         print(f"✅ LLM Response: {answer[:300]}...\n")
