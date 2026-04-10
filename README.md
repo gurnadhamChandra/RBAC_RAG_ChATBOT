@@ -122,8 +122,7 @@ RBAC_RAG_CHATBOT/
 
 ## ⚙️ Setup Instructions
 
-### 🔹 1. Clone the Repository
-```bash
+1. Clone the Repository
 git clone https://github.com/your-username/RBAC_RAG_CHATBOT.git
 cd RBAC_RAG_CHATBOT
 
