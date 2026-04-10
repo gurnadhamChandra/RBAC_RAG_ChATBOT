@@ -74,60 +74,43 @@ It uses **Retrieval-Augmented Generation (RAG)** to fetch relevant information f
 ---
 
 ## 🗂️ Project Structure
+
+```bash
 RBAC_RAG_CHATBOT/
 │
 ├── backend/
 │   ├── app/
-│   │   ├── schemas/          # Request/response models (Pydantic)
-│   │   ├── services/         # Business logic (RAG, auth, etc.)
-│   │   ├── __init__.py
-│   │   └── main.py           # FastAPI entry point
-│   │
-│   ├── faiss_vectors/        # Vector embeddings (ignored in Git)
-│   ├── resources/            # Source documents for embeddings
-│   ├── venv/                 # Virtual environment (ignored)
-│   ├── .env                  # Environment variables (ignored)
-│   ├── .gitignore
-│   ├── .python-version
-│   ├── pyproject.toml
-│   ├── requirements.txt
-│   ├── users.json            # User data & roles (ignored)
-│   └── README.md
+│   │   ├── schemas/
+│   │   ├── services/
+│   │   └── main.py
+│   ├── faiss_vectors/
+│   ├── resources/
+│   ├── users.json
+│   └── requirements.txt
 │
 ├── frontend/
-│   ├── dist/                 # Build files (ignored)
-│   ├── node_modules/         # Dependencies (ignored)
 │   ├── src/
 │   │   ├── app/
-│   │   │   ├── components/   # UI components
-│   │   │   ├── pages/        # Application pages
-│   │   │   ├── services/     # API calls
-│   │   │   └── types/        # TypeScript types
-│   │   │
-│   │   ├── App.tsx           # Root component
-│   │   ├── routes.ts         # Routing config
-│   │   ├── styles/           # Global styles
-│   │   └── main.tsx          # Entry point
-│   │
-│   ├── .env                  # Frontend env variables (ignored)
-│   ├── .gitignore
-│   ├── index.html
-│   ├── package.json
-│   ├── package-lock.json
-│   └── postcss.config.mjs
+│   │   │   ├── components/
+│   │   │   ├── pages/
+│   │   │   └── services/
+│   │   ├── App.tsx
+│   │   └── main.tsx
+│   └── package.json
 │
 └── README.md
+```
 
 
 
 ## ⚙️ Setup Instructions
 
-1. Clone the Repository
+### 1. Clone the Repository
 git clone https://github.com/your-username/RBAC_RAG_CHATBOT.git
 cd RBAC_RAG_CHATBOT
 
 
-2. Backend Setup
+### 2. Backend Setup
 cd backend
 python -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
@@ -135,16 +118,16 @@ source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn main:app --reload
 
-3. Frontend Setup
+### 3. Frontend Setup
 cd frontend
 npm install
 npm run dev
 
-4. Environment Variables
+### 4. Environment Variables
 Create .env file in backend:
 GROQ_API_KEY=your_api_key_here
 
-🔐 Roles & Access
+### 🔐 Roles & Access
 Role	Access Scope
 HR	---Employee data, payroll, policies
 Finance ---	Expenses, budgets, revenue
@@ -153,13 +136,13 @@ Engineering	--- Dev docs, architecture
 C-Level Exec	----Full access
 Employee	---General FAQs
 
-💬 Sample Queries
+### 💬 Sample Queries
 HR → "Who has the most leave balance?"
 Finance → "List reimbursements above ₹10,000"
 Engineering → "Explain CI/CD pipeline"
 Employee → "How to apply for leave?"
 
-👨‍💻 Author
+### 👨‍💻 Author
 
 Gurnadham Chandra
 Senior Software Engineer | AI/ML Enthusiast
