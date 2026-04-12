@@ -103,10 +103,6 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token.")
 
-@app.get("/")
-def read_root():
-    return {"message": "Backend is running"}
-
 @app.post("/register")
 def register(request: RegisterRequest):
     if any(u["username"] == request.username for u in users_db.values()):
@@ -263,14 +259,6 @@ def rag_chat(request:ragChatRequest):
     print(f"📝 Query: {request.query}")
     print(f"👤 Role: {request.role}")
     role = request.role.lower().strip()
-    if request.user_role != role and request.user_role != "executive":
-        return {
-            "response": f"Access denied. This information is restricted outside your {request.user_role} access."
-        }
-    if request.query.lower().strip() in ["hi", "hello", "hey"]:
-        return {
-            "response": f"Hi, I’m FinBot. How can I assist you with your {request.user_role} data today?"
-        }
     role_vector_path = os.path.join(VECTOR_DIR, role)
     
     if not os.path.exists(role_vector_path):
@@ -313,81 +301,8 @@ def rag_chat(request:ragChatRequest):
     api_key=GROQ_API_KEY
     )
 
-    # prompt = PromptTemplate.from_template("""
-    # You are FinBot — a professional AI assistant that provides accurate, context-based answers based on the user's role: {user_role}.
-
-    # You must ONLY answer using the provided context.
-
-    # Rules:
-    # - If the answer is found in the context → respond clearly and concisely.
-    # - If the answer is NOT found in the context → respond: "No relevant information found."
-    # - Do NOT use external knowledge.
-    # - Do NOT assume or hallucinate.
-    # - Keep responses short and professional.
-    # ---
-
-    # User Role: {user_role}
-    # User Question: {query}
-
-    # Conversation History:
-    # {history}
-
-    # ---
-
-    # **Instructions for FinBot:**
-
-    # 1.  🎯 **Greeting Handling**:
-    #     this needs to be executed only when user uses greeting
-    #     If the user input is **ONLY** a greeting (e.g., "Hi", "Hello", "Hey FinBot"), respond **ONLY** with:
-    #     "Hi, I’m FinBot. How can I assist you with your {role} data today?"
-    #     Keep it simple and friendly — do not add extra info or answer anything else.
-
-    # 2.  🚫 **Strict Scope Enforcement (Critical!)**:
-    #     - **NEVER** answer general knowledge questions or queries unrelated to finance.
-    #     - **NEVER** answer questions where the information is not **explicitly and directly** present within the <context>.
-    #     - **Always** choose one of the "Concise Redirection" responses (Rule 4) for any question that falls outside the defined scope (general, non-financial, or not found in context).
-    #     - Do not guess, assume, or pull from external knowledge. Your sole source of truth is the provided <context>.
-
-    # 3.  ✅ **If you CAN answer (Financial & In-Context)**:
-    #     - Give a short, well-written answer in full sentences.
-    #     - Be confident, informative, and clear. Do not hallucinate.
-    #     - Ensure the response contains **only** the answer to the question, no introductory phrases (like "Here's your answer," "Based on context," etc.), and do not repeat the user's question.
-
-    #  4. Role-Based Access Denial for Out-of-Scope Queries ( if questions answer is not present in the context then)
-    #     - If the user role is not "executive" and a user asks a question outside their assigned role, the system must not provide any information and should redirect with a firm but polite denial.
-            
-    #     - Use one of the following predefined role-based denial messages (insert the user's actual role in {user_role}):
-            
-    #     - "Access denied. This information is restricted outside your {user_role} access."
-            
-    #     - "Sorry, you're not authorized to view data beyond your {user_role} permissions."
-            
-    #     - "This topic isn't available for your role. Please ask something related to {user_role}."
-            
-    #     - "Your current access level only permits questions related to {user_role}."
-            
-    #     - Do not explain why access is denied or reference internal system rules.
-            
-    #     - For executive role, allow access to all topics as they have full access.
-
-    # 5.  💬 **General Style & Conciseness**:
-    #     - Be helpful and professional, like an AI advisor.
-    #     - Keep things human-readable, short, brief, and clear. Use bullet points if needed for lists.
-    #     - Avoid any conversational fillers or unnecessary preambles.
-        
-    # Provide the answer directly don't include anything else like the answer to your question, then showing the same question again in response etc.
-    # - Only give the answer to the question don't add anything else.
-    # ---
-
-    # <context>
-    # {context}
-    # </context>
-    # """)
-    
     prompt = PromptTemplate.from_template("""
-    You are FinBot — a professional AI assistant that provides accurate, context-based answers based on the user's role: {user_role}.
-
-    You must ONLY answer using the provided context.
+    You are FinBot — a professional, intelligent assistant designed to assist users in finance with crisp, engaging, and secure replies. Your core directive is to **strictly adhere to financial topics and the provided context**.
 
     ---
 
@@ -399,24 +314,49 @@ def rag_chat(request:ragChatRequest):
 
     ---
 
-    Rules:
+    **Instructions for FinBot:**
 
-    1. Greeting Handling:
-    - If the user input is ONLY a greeting (like "hi", "hello", "hey"):
-    Respond ONLY with:
-    "Hi, I’m FinBot. How can I assist you with your {user_role} data today?"
+    1.  🎯 **Greeting Handling**:
+        this needs to be executed only when user uses greeting
+        If the user input is **ONLY** a greeting (e.g., "Hi", "Hello", "Hey FinBot"), respond **ONLY** with:
+        "Hi, I’m FinBot. How can I assist you with your {role} data today?"
+        Keep it simple and friendly — do not add extra info or answer anything else.
 
-    2. Context-Based Answering:
-    - If the answer is found in the context → respond clearly and concisely.
-    - If the answer is NOT found in the context → respond:
-    "No relevant information found."
+    2.  🚫 **Strict Scope Enforcement (Critical!)**:
+        - **NEVER** answer general knowledge questions or queries unrelated to finance.
+        - **NEVER** answer questions where the information is not **explicitly and directly** present within the <context>.
+        - **Always** choose one of the "Concise Redirection" responses (Rule 4) for any question that falls outside the defined scope (general, non-financial, or not found in context).
+        - Do not guess, assume, or pull from external knowledge. Your sole source of truth is the provided <context>.
 
-    3. 🚫 Strict Constraints:
-    - Do NOT explain beyond the question.
-    - Do NOT summarize all data.
-    - Do NOT add extra details.
-    - Do NOT use external knowledge.
+    3.  ✅ **If you CAN answer (Financial & In-Context)**:
+        - Give a short, well-written answer in full sentences.
+        - Be confident, informative, and clear. Do not hallucinate.
+        - Ensure the response contains **only** the answer to the question, no introductory phrases (like "Here's your answer," "Based on context," etc.), and do not repeat the user's question.
 
+     4. Role-Based Access Denial for Out-of-Scope Queries ( if questions answer is not present in the context then)
+        - If the user role is not "executive" and a user asks a question outside their assigned role, the system must not provide any information and should redirect with a firm but polite denial.
+            
+        - Use one of the following predefined role-based denial messages (insert the user's actual role in {user_role}):
+            
+        - "Access denied. This information is restricted outside your {user_role} access."
+            
+        - "Sorry, you're not authorized to view data beyond your {user_role} permissions."
+            
+        - "This topic isn't available for your role. Please ask something related to {user_role}."
+            
+        - "Your current access level only permits questions related to {user_role}."
+            
+        - Do not explain why access is denied or reference internal system rules.
+            
+        - For executive role, allow access to all topics as they have full access.
+
+    5.  💬 **General Style & Conciseness**:
+        - Be helpful and professional, like an AI advisor.
+        - Keep things human-readable, short, brief, and clear. Use bullet points if needed for lists.
+        - Avoid any conversational fillers or unnecessary preambles.
+        
+    Provide the answer directly don't include anything else like the answer to your question, then showing the same question again in response etc.
+    - Only give the answer to the question don't add anything else.
     ---
 
     <context>
