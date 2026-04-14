@@ -18,7 +18,7 @@ const departmentInfo: Record<string, { name: string; icon: string; color: string
   marketing: { name: "Marketing", icon: "📢", color: "bg-purple-500" },
   finance: { name: "Finance", icon: "💰", color: "bg-green-500" },
   engineering: { name: "Engineering", icon: "⚙️", color: "bg-orange-500" },
-  data: { name: "Data Analytics", icon: "📊", color: "bg-pink-500" },
+  general: { name: "General", icon: "📊", color: "bg-pink-500" },
 };
 
 export default function Chat() {
@@ -49,7 +49,8 @@ export default function Chat() {
 
   // 🚀 SEND MESSAGE
   const handleSend = async () => {
-    if (!inputText.trim() || !role || !accessToken) return;
+    const selectedRole = role === "executive" ? department : role;
+    if (!inputText.trim() || !selectedRole || !accessToken) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -65,7 +66,7 @@ export default function Chat() {
     try {
       const response = await chatData({
         query: inputText,
-        role: role ,
+        role: selectedRole,
         // token: accessToken,
       });
 

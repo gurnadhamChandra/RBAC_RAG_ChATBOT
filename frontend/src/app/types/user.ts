@@ -4,7 +4,7 @@ export type UserRole =
   | "marketing"
   | "finance"
   | "engineering"
-  | "data"
+  | "general"
   | "executive"
   ;
 
@@ -45,14 +45,14 @@ export const RBAC_CONFIG = {
     accessLevel: "Engineering Team Access",
     allowedDepartments: ["engineering"],
   },
-  data: {
-    label: "Data Analytics Team",
-    accessLevel: "Data Team Access",
-    allowedDepartments: ["data"],
+  general: {
+    label: "General Team",
+    accessLevel: "General Team Access",
+    allowedDepartments: ["general"],
   },
   executive: {
     label: "C-Level Executive",
     accessLevel: "Full Access (All Departments)",
-    allowedDepartments: ["hr", "marketing", "finance", "engineering", "data"],
+    allowedDepartments: ["hr", "marketing", "finance", "engineering", "general"],
   },
 } as const;
