@@ -49,7 +49,7 @@ class logoutRequest(BaseModel):
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
-app = FastAPI(title="RAG Chatbot Auth API")
+app = FastAPI(title="RAG Chatbot")
 
 DB_FILE = "users.json"
 
