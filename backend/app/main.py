@@ -1,6 +1,5 @@
-from fastapi import FastAPI, HTTPException, Depends, Form
+from fastapi import FastAPI, HTTPException, Depends, Form, Body, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from typing import Dict, Optional
@@ -19,11 +18,22 @@ from langchain_community.vectorstores import FAISS
 from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from collections import defaultdict, deque
-
-# store last 5 chats  of user
-chat_memory=defaultdict(lambda: deque(maxlen=5))
+from pydantic import BaseModel
+# Store last 5 chat turns per user/role (can be extended to use username too)
+chat_memory = defaultdict(lambda: deque(maxlen=5))
+# Initialize
 load_dotenv()
-warnings.filterwarnings("ignore", category=UserWarning, module="langchain")
+warnings.filterwarnings("ignore")
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "..", "resources", "data")
+
+HF_TOKEN = os.getenv("HUGGINGFACEHUB_API_TOKEN")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+SECRET_KEY = "supersecretkey"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 class LoginRequest(BaseModel):
     username: str
@@ -37,34 +47,19 @@ class RegisterRequest(BaseModel):
 class logoutRequest(BaseModel):
     username: str
 
-class ragChatRequest(BaseModel):
-    query:str
-    role:str
-
-BASE_DIR =os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "..","resources","data")
-
-
-# HF_TOKEN = os.getenv("HUGGINGFACEHUB_API_TOKEN")
-# GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-
-SECRET_KEY = "supersecretkey"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-
-
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
-app = FastAPI(title="RAG-Powered Role-Based Chatbot API")
+
+app = FastAPI(title="RAG Chatbot Auth API")
+
 DB_FILE = "users.json"
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Streamlit origin
+    allow_origins=["http://localhost:5173"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 def load_users():
     if os.path.exists(DB_FILE):
@@ -102,6 +97,7 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token.")
 
+
 @app.post("/register")
 def register(request: RegisterRequest):
     if any(u["username"] == request.username for u in users_db.values()):
@@ -129,6 +125,7 @@ def login(request: LoginRequest):
         "role": user["role"]
     })
     return {"access_token": token, "token_type": "bearer", "username": user["username"], "role": user["role"]}
+
 
 @app.post("/logout")
 def logout(request:logoutRequest):
@@ -160,20 +157,20 @@ VECTOR_DIR = "./faiss_vectors"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
-
+splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
 
 @app.post("/build_vectors")
 def build_vectors():
-    print("starting build vector process...")
-    logs={}
-     # 1. Reset vector storage
+    print("\n🚀 Starting vector building process...")
+    logs = {}
+
+    # 1. Reset vector storage
     if os.path.exists(VECTOR_DIR):
         print("🧹 Cleaning old vector directory...")
         shutil.rmtree(VECTOR_DIR)
     os.makedirs(VECTOR_DIR, exist_ok=True)
     print(f"📁 Vector directory ready: {VECTOR_DIR}")
-    
+
     # 2. Iterate through each role
     for role in os.listdir(DATA_DIR):
         role_path = os.path.join(DATA_DIR, role)
@@ -214,17 +211,19 @@ def build_vectors():
             print(logs[role])
             continue
 
-        #chunks storing
-        chunks=splitter.split_documents(all_docs)
-        print(f"created{len(chunks)} chunks for role:{role}")
+        # 3. Chunk and store
+        chunks = splitter.split_documents(all_docs)
+        print(f"✂️ Created {len(chunks)} chunks for role: {role}")
+
         if not chunks:
-            logs[role]="No chunks created"
+            logs[role] = "⚠️ No chunks created"
             continue
+
         try:
-            vectordb=FAISS.from_documents(chunks,embedding_model)
-            role_vect_path=os.path.join(VECTOR_DIR,role)
-            vectordb.save_local(role_vect_path)
-            logs[role] = f"✅ {len(chunks)} chunks stored at {role_vect_path}"
+            vectordb = FAISS.from_documents(chunks, embedding_model)
+            role_vec_path = os.path.join(VECTOR_DIR, role)
+            vectordb.save_local(role_vec_path)
+            logs[role] = f"✅ {len(chunks)} chunks stored at {role_vec_path}"
             print(logs[role])
         except Exception as e:
             logs[role] = f"❌ Vector store creation failed: {e}"
@@ -234,37 +233,54 @@ def build_vectors():
     return {"status": "completed", "details": logs}
 
 @app.post("/rag_chat")
-def rag_chat(request:ragChatRequest):
+async def rag_chat(
+    request: Request,
+    query: str | None = Form(None),
+    role: str | None = Form(None),
+):
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    if isinstance(body, dict):
+        query = query or body.get("query")
+        role = role or body.get("role")
+
+    if not query or not role:
+        raise HTTPException(status_code=400, detail="Query and role are required.")
+
     print(f"\n🟦 Received RAG Chat Request")
-    print(f"📝 Query: {request.query}")
-    print(f"👤 Role: {request.role}")
-    role = request.role.lower().strip()
+    print(f"📝 Query: {query}")
+    print(f"👤 Role: {role}")
+
+    role = role.lower().strip()
     role_vector_path = os.path.join(VECTOR_DIR, role)
-    
+
     if not os.path.exists(role_vector_path):
         msg = f"❌ No vector store found for role '{role}'"
         print(msg)
         raise HTTPException(status_code=404, detail=msg)
-    
+
     try:
-        print(f"loading vector from local vector:{role_vector_path}")
-        vectordb=FAISS.load_local(
+        print(f"📥 Loading vector store from: {role_vector_path}")
+        vectordb = FAISS.load_local(
             folder_path=role_vector_path,
             embeddings=embedding_model,
             allow_dangerous_deserialization=True
         )
-        retriver=vectordb.as_retriever(
-            # max marginal relevence
-            search_type="mmr", 
+        retriever = vectordb.as_retriever(
+            search_type="mmr",
             search_kwargs={
-                 "k": 10,  # Increase to give the model more context to work with
+                "k": 10,  # Increase to give the model more context to work with
                 "lambda_mult": 0.5  # 0.5 balances relevance (0.0) and diversity (1.0)
             }
         )
-        docs = retriver.invoke(request.query)
+        docs = retriever.invoke(query)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"❌ Retrieval error: {e}")
-    
+
     if not docs:
         return {"response": "No relevant information found."}
 
@@ -275,11 +291,6 @@ def rag_chat(request:ragChatRequest):
     formatted_history = ""
     for i, (q, a) in enumerate(history):
         formatted_history += f"\nUser: {q}\nFinBot: {a}"
-
-    llm = ChatGroq(
-    model_name="llama-3.1-8b-instant",
-    api_key=GROQ_API_KEY
-    )
 
     prompt = PromptTemplate.from_template("""
     You are FinBot — a professional, intelligent assistant designed to assist users in finance with crisp, engaging, and secure replies. Your core directive is to **strictly adhere to financial topics and the provided context**.
@@ -344,23 +355,26 @@ def rag_chat(request:ragChatRequest):
     </context>
     """)
 
-   # 🔥 NEW CHAIN (LCEL)
+    prompt_text = prompt.format(
+        context=context,
+        query=query,
+        role=role,
+        history=formatted_history,
+    )
 
-    chain = prompt | llm
+    llm = ChatGroq(
+        model_name="llama-3.1-8b-instant",
+        api_key=GROQ_API_KEY
+    )
 
     try:
-        response = chain.invoke({
-            "context": context,
-            "query": request.query,
-            "role": role,
-            "history": formatted_history
-        })
-        answer =response.content
+        answer_msg = llm.invoke(prompt_text)
+        answer = answer_msg.content
         print(f"✅ LLM Response: {answer[:300]}...\n")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"❌ LLM error: {e}")
 
     # 📝 Save current interaction in memory
-    chat_memory[role].append((request.query, answer))
+    chat_memory[role].append((query, answer))
 
     return {"response": answer}
